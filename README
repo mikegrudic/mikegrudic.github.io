@@ -1,0 +1,15 @@
+FormationRedshift - redshift at which the cluster formed
+Snapshot - number of the FIRE snapshot that the cluster's cloud was found in
+Cloud - ID of the cloud within the snapshot
+CloudClusterID - ID of the cluster among all clusters formed in that cloud
+Mass - Cluster mass in msun
+HalfMassRadius - Cluster half-mass radius in pc
+ProgenitorMass - mass of the progenitor cloud in msun
+ProgenitorReff - effective radius (radius of a sphere of equal moment of inertia) of the progenitor cloud
+Metallicity - mass fraction of metals
+FormationTime - cosmic time of formation in Gyr
+EFFGamma - Elson, Fall and Freeman 1987 surface brightness profile slope parameter
+GalactocentricRadius - distance from the centre of the main galaxy in physical kpc
+GalactocentricMenc - Enclosed mass at GalactocentricRadius in msun
+Coordinates - position of the cluster in the simulation box at z=0, in physical kpc
+TracerID - ID of the tracer particle of the cluster (integer)
