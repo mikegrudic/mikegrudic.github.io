@@ -4,8 +4,8 @@ author:
   email: mike.grudic@gmail.com
 
 domain: mikegrudic.github.io       # if you want to force HTTPS, specify the domain without the http at the start, e.g. example.com
-url: https://mikegrudic.github.io  # the base hostname and protocol for your site, e.g. http://example.com
-#aseurl: /hikin#/      # place folder name if the site is served in a subfolder
+url: https://my-site.github.io  # the base hostname and protocol for your site, e.g. http://example.com
+baseurl: /hiking/      # place folder name if the site is served in a subfolder
 
 # The `>` after `description:` means to ignore line-breaks until next key.
 # If you want to omit the line-break after the end of text, use `>-` instead.
