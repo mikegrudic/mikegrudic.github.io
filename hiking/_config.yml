@@ -3,6 +3,10 @@ author:
   name: Mike Grudić
   email: mike.grudic@gmail.com
 
+domain: mikegrudic.github.io       # if you want to force HTTPS, specify the domain without the http at the start, e.g. example.com
+url: https://my-site.github.io  # the base hostname and protocol for your site, e.g. http://example.com
+baseurl: /hiking/      # place folder name if the site is served in a subfolder
+
 # The `>` after `description:` means to ignore line-breaks until next key.
 # If you want to omit the line-break after the end of text, use `>-` instead.
 description: >
@@ -30,6 +34,8 @@ plugins:
 # in order as they should show up.
 header_pages:
   - about.md
+
+show_excerpts: true
 
 # Set to `true` to show excerpts on the homepage.
 #show_excerpts: false
