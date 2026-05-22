@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GPX Elevation Profile</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 1000px; margin: 2em auto; padding: 0 1em; }
+  h1 { margin-bottom: 0.2em; }
+  .controls { display: flex; flex-direction: column; gap: 0.8em; margin: 1em 0; }
+  .control-row { display: flex; align-items: center; gap: 0.8em; flex-wrap: wrap; }
+  .control-row label { min-width: 12em; }
+  input[type="range"] { flex: 1; min-width: 200px; }
+  #status { color: #666; font-style: italic; min-height: 1.2em; }
+  .metrics { display: flex; flex-wrap: wrap; gap: 1.5em; margin: 1em 0; padding: 0.6em 1em; background: #f4f4f4; border-radius: 6px; }
+  .metrics span { font-size: 0.95em; }
+  .metrics strong { display: block; font-size: 1.2em; color: #222; }
+  #plot img { max-width: 100%; height: auto; }
+</style>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+</head>
+<body>
+
+<h1>GPX Elevation Profile</h1>
+<p>Upload a GPX track to see elevation, grade, and Strava grade-adjusted-pace factor vs. distance.</p>
+
+<div class="controls">
+  <div class="control-row">
+    <label for="gpx">GPX file:</label>
+    <input type="file" id="gpx" accept=".gpx" disabled>
+  </div>
+  <div class="control-row">
+    <label for="smooth">Elevation smoothing (m): <span id="smooth-val">0</span></label>
+    <input type="range" id="smooth" min="0" max="1000" value="0" step="10" disabled>
+  </div>
+</div>
+
+<div id="status">Loading Python runtime (this takes a few seconds on first load)…</div>
+<div id="plot"></div>
+
+<script type="module">
+let pyodide = null;
+let renderInFlight = false;
+let pendingRender = false;
+
+async function init() {
+  pyodide = await loadPyodide();
+  setStatus("Loading numpy and matplotlib…");
+  await pyodide.loadPackage(["numpy", "matplotlib"]);
+
+  setStatus("Fetching library files…");
+  const gapBuf = await (await fetch("strava_GAP_table.dat")).arrayBuffer();
+  pyodide.FS.writeFile("strava_GAP_table.dat", new Uint8Array(gapBuf));
+  const libSrc = await (await fetch("elevation_profile.py")).text();
+  pyodide.FS.writeFile("elevation_profile.py", libSrc);
+
+  pyodide.runPython(`
+import base64
+import io
+import matplotlib
+matplotlib.use("Agg")
+import numpy as np
+from matplotlib import pyplot as plt
+from elevation_profile import ElevationProfile
+
+_state = {"bytes": None, "smoothing": 0.0}
+
+M_TO_MI = 0.0006213711922
+M_TO_FT = 3.280839895
+
+def set_bytes(b):
+    _state["bytes"] = bytes(b)
+
+def set_smoothing(s):
+    _state["smoothing"] = float(s)
+
+def render():
+    if _state["bytes"] is None:
+        return ""
+    profile = ElevationProfile.from_gpx(
+        io.BytesIO(_state["bytes"]),
+        smoothing_length=_state["smoothing"],
+    )
+    distance_mi = profile.distance * M_TO_MI
+    elevation_ft = profile.elevation * M_TO_FT
+    gain_ft = float(np.sum(np.maximum(0.0, np.diff(elevation_ft))))
+
+    fig, (ax_elev, ax_grade, ax_gap) = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
+    ax_elev.plot(distance_mi, elevation_ft, lw=1, color="C0")
+    ax_elev.set_ylabel("Elevation (ft)")
+    ax_elev.grid(alpha=0.3)
+
+    ax_grade.plot(distance_mi, profile.grade, lw=0.7, color="C1")
+    ax_grade.axhline(0, color="k", lw=0.3)
+    ax_grade.set_ylabel("Grade (%)")
+    ax_grade.grid(alpha=0.3)
+
+    ax_gap.plot(distance_mi, profile.gap_factor, lw=0.7, color="C2")
+    ax_gap.axhline(1, color="k", lw=0.3)
+    ax_gap.set_ylabel("GAP factor")
+    ax_gap.set_xlabel("Distance (mi)")
+    ax_gap.grid(alpha=0.3)
+    fig.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=100)
+    plt.close(fig)
+    img_src = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    metrics_html = (
+        "<div class='metrics'>"
+        f"<span><strong>{distance_mi[-1]:.2f} mi</strong>Distance</span>"
+        f"<span><strong>{gain_ft:,.0f} ft</strong>Total gain</span>"
+        f"<span><strong>{profile.grade.min():+.1f} / {profile.grade.max():+.1f} %</strong>Grade range</span>"
+        f"<span><strong>{float(np.median(profile.gap_factor)):.2f}&times;</strong>Median GAP factor</span>"
+        "</div>"
+    )
+    return metrics_html + f"<img src='{img_src}'>"
+  `);
+
+  bindEvents();
+  setStatus("Ready. Upload a GPX file to begin.");
+  document.getElementById("gpx").disabled = false;
+  document.getElementById("smooth").disabled = false;
+}
+
+function setStatus(msg) {
+  document.getElementById("status").textContent = msg;
+}
+
+function bindEvents() {
+  document.getElementById("gpx").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const buf = await file.arrayBuffer();
+    pyodide.globals.get("set_bytes")(new Uint8Array(buf));
+    scheduleRender();
+  });
+
+  const slider = document.getElementById("smooth");
+  const label = document.getElementById("smooth-val");
+  slider.addEventListener("input", () => {
+    label.textContent = slider.value;
+  });
+  slider.addEventListener("change", () => {
+    pyodide.globals.get("set_smoothing")(parseFloat(slider.value));
+    scheduleRender();
+  });
+}
+
+async function scheduleRender() {
+  if (renderInFlight) {
+    pendingRender = true;
+    return;
+  }
+  renderInFlight = true;
+  try {
+    setStatus("Rendering…");
+    const html = pyodide.globals.get("render")();
+    if (html) {
+      document.getElementById("plot").innerHTML = html;
+      setStatus("");
+    }
+  } catch (e) {
+    setStatus("Error: " + e.message);
+    console.error(e);
+  } finally {
+    renderInFlight = false;
+    if (pendingRender) {
+      pendingRender = false;
+      scheduleRender();
+    }
+  }
+}
+
+init().catch((e) => {
+  setStatus("Failed to initialize: " + e.message);
+  console.error(e);
+});
+</script>
+
+</body>
+</html>
