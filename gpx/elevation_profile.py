@@ -141,7 +141,7 @@ class ElevationProfile:
     gap_factor: np.ndarray
 
     @classmethod
-    def from_gpx(cls, path, smoothing_length=0.0):
+    def from_gpx(cls, path, smoothing_length=50.0):
         """Build an ElevationProfile from a GPX track.
 
         Parses ``<trkpt>`` elements (with ``<ele>`` children), computes
@@ -156,10 +156,10 @@ class ElevationProfile:
             Path to the GPX file.
         smoothing_length : float, optional
             E-folding length (meters) for IIR smoothing applied to the
-            elevation series before grade is computed. ``0`` (the default)
-            disables smoothing. Larger values suppress more high-frequency
-            altimeter/GPS noise at the cost of phase lag and reduced grade
-            resolution.
+            elevation series before grade is computed. Defaults to ``50``;
+            set to ``0`` to disable. Larger values suppress more
+            high-frequency altimeter/GPS noise at the cost of phase lag
+            and reduced grade resolution.
         """
         lat, lon, elevation = _parse_gpx_points(path)
         if len(lat) < 2:
@@ -177,3 +177,36 @@ class ElevationProfile:
         grade = np.gradient(elevation, distance) * 100.0
         gap_factor = _gap_factor(grade)
         return cls(distance=distance, elevation=elevation, grade=grade, gap_factor=gap_factor)
+    
+    def constant_gap_split_time(self, total_time_minutes, fatigue_rate_per_hour=0.0):
+        """Elapsed time (minutes) at each track point.
+
+        Without fatigue (``fatigue_rate_per_hour=0``), the runner holds a
+        constant grade-adjusted pace and elapsed time scales linearly with
+        cumulative effort.
+
+        With ``fatigue_rate_per_hour > 0``, GAP pace inflates exponentially
+        with elapsed time: ``gap_pace(t) = gap_pace(0) * (1 + f)**t`` where
+        ``f`` is the fractional decay per hour (e.g. ``0.05`` for 5 %/h).
+        ``total_time_minutes`` is conserved by construction.
+
+        Parameters
+        ----------
+        total_time_minutes : float
+            Target total time for the route, in minutes.
+        fatigue_rate_per_hour : float, optional
+            Fractional GAP-pace inflation per hour of elapsed time. ``0``
+            (the default) means no fatigue.
+        """
+        avg_factor = 0.5 * (self.gap_factor[:-1] + self.gap_factor[1:])
+        segment_effort = avg_factor * np.diff(self.distance)
+        cumulative_effort = np.concatenate(([0.0], np.cumsum(segment_effort)))
+        g_ratio = cumulative_effort / cumulative_effort[-1]
+
+        if fatigue_rate_per_hour == 0.0:
+            return total_time_minutes * g_ratio
+
+        k = np.log1p(fatigue_rate_per_hour)
+        total_hours = total_time_minutes / 60.0
+        decay = 1.0 - np.exp(-k * total_hours)
+        return -np.log1p(-decay * g_ratio) / k * 60.0
