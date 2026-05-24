@@ -293,8 +293,16 @@ def render():
     split_durations = times_at_marks - prev_times
     segment_lengths_mi = mile_marks - prev_marks
 
+    segment_gain_ft = []
+    for prev_m, mile in zip(prev_marks, mile_marks):
+        interior_mask = (distance_mi > prev_m) & (distance_mi < mile)
+        elev_start = float(np.interp(prev_m, distance_mi, elevation_ft))
+        elev_end = float(np.interp(mile, distance_mi, elevation_ft))
+        seg_elev = np.concatenate(([elev_start], elevation_ft[interior_mask], [elev_end]))
+        segment_gain_ft.append(float(np.sum(np.maximum(0.0, np.diff(seg_elev)))))
+
     rows = []
-    for mile, dur_min, cum_min, seg_mi in zip(mile_marks, split_durations, times_at_marks, segment_lengths_mi):
+    for mile, dur_min, cum_min, seg_mi, gain in zip(mile_marks, split_durations, times_at_marks, segment_lengths_mi, segment_gain_ft):
         if abs(mile - round(mile)) < 1e-6:
             label = f"{int(round(mile))}"
         else:
@@ -303,6 +311,7 @@ def render():
         rows.append(
             "<tr>"
             f"<td>{label}</td>"
+            f"<td>{gain:,.0f}</td>"
             f"<td>{_format_clock(dur_min * 60)}</td>"
             f"<td>{pace_str}</td>"
             f"<td>{_format_clock(cum_min * 60)}</td>"
@@ -312,7 +321,7 @@ def render():
         "<div class='results-splits'>"
         "<h2>Mile splits</h2>"
         "<table class='splits'>"
-        "<thead><tr><th>Mile</th><th>Split</th><th>Pace (min/mi)</th><th>Cumulative</th></tr></thead>"
+        "<thead><tr><th>Mile</th><th>Gain (ft)</th><th>Split</th><th>Pace (min/mi)</th><th>Cumulative</th></tr></thead>"
         "<tbody>" + "".join(rows) + "</tbody></table>"
         "</div>"
     )
