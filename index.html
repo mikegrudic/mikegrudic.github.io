@@ -1,310 +1,496 @@
-<!DOCTYPE HTML>
-<!--
-	Miniport by HTML5 UP
-	html5up.net | @ajlkn
-	Free for personal and commercial use under the CCA 3.0 license (html5up.net/license)
-  -->
-
-<html>
-
+<!DOCTYPE html>
+<html lang="en">
 <head>
-	<title>Mike Grudić's Website</title>
-	<meta charset="utf-8" />
-	<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-	<link rel="stylesheet" href="assets/css/main.css" />
+<meta charset="UTF-8">
+<title>GPX Elevation Profile</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 1400px; margin: 2em auto; padding: 0 1em; }
+  h1 { margin-bottom: 0.2em; }
+  .controls { display: flex; flex-direction: column; gap: 0.8em; margin: 1em 0; }
+  .control-row { display: flex; align-items: center; gap: 0.8em; flex-wrap: wrap; }
+  .control-row label { min-width: 12em; }
+  input[type="range"] { flex: 1; min-width: 200px; }
+  #status { color: #666; font-style: italic; min-height: 1.2em; }
+  .metrics { display: flex; flex-wrap: wrap; gap: 1.5em; margin: 1em 0; padding: 0.6em 1em; background: #f4f4f4; border-radius: 6px; }
+  .metrics span { font-size: 0.95em; }
+  .metrics strong { display: block; font-size: 1.2em; color: #222; }
+  #plot img { max-width: 100%; height: auto; display: block; }
+  .results-row { display: flex; gap: 1.5em; align-items: flex-start; flex-wrap: wrap; }
+  .results-plot { flex: 1 1 700px; min-width: 0; }
+  .results-splits { flex: 0 1 auto; }
+  .results-splits h2 { margin-top: 0; }
+  table.splits { border-collapse: collapse; margin: 0 0 1em 0; font-variant-numeric: tabular-nums; }
+  table.splits th, table.splits td { padding: 0.3em 0.9em; text-align: right; border-bottom: 1px solid #ddd; }
+  table.splits th { background: #f4f4f4; }
+  table.splits td:first-child, table.splits th:first-child { text-align: left; }
+</style>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
 </head>
+<body>
 
-<body class="is-preload">
+<h1>Elevation Profile Pace Calculator</h1>
+<p>Upload a GPX track to see elevation, grade, and Strava grade-adjusted-pace factor vs. distance, assuming a constant-fatigue-rate model where the rate of work you are doing decays by a certain percentage each hour. 
 
-	<!-- Nav -->
-	<nav id="nav">
-		<ul class="container">
-			<li><a href="#top">Top</a></li>
-			<li><a href="#work">Research</a></li>
-			<li><a href="#portfolio">Software</a></li>
-			<li><a href="#aboutme">About Me</a></li>
-			<li><a href="MYG_CV.pdf" target="_blank">CV</a></li>
-			<li><a href="https://ui.adsabs.harvard.edu/search/q=-docs(56c4b65ab1a1a3f16a18c35f08f32a2c)%20-docs(f1eaa9e10da61265795efb741437a00c)%20author%3A%22Grudich%22%20OR%20author%3A%22Grudic%22%20OR%20author%3A%22Grudi%C4%87%22&sort=date%20desc%2C%20bibcode%20desc&p_=0"
-					target="_blank">Publications</a></li>
-			<li><a href="movies.html">Movies</a></li>
-			<li><a href="adventures.html">Mountains</a></li>
-			<li><a href="http://www.starforge.space">STARFORGE</a></li>
-			<!-- <li><a href="#contact">Contact</a></li> -->
-		</ul>
-	</nav>
+Note that the GAP model is calibrated to highly idealized conditions (not real trails) and is simply extrapolated to any absolute grades greater than 30%.
+</p>
 
-	<!-- Home -->
-	<article id="top" class="wrapper style1">
-		<div class="container">
-			<div class="row">
-				<div class="col-4 col-5-large col-12-medium">
-					<span class="image fit"><img src="images/me2.jpg" alt="" /></span>
-				</div>
-				<div class="col-8 col-7-large col-12-medium">
-					<header>
-						<h1><strong>Mike Grudić</strong></h1>
-						<h1>Theoretical Astrophysicist</h1>
-					</header>
-					<p>I'm Mike, an astrophysicist at the Flatiron Institute Center for Computational Astrophysics.
-						Here you'll find all things about me and my science.</p>
+<div class="controls">
+  <div class="control-row">
+    <label for="gpx">GPX file:</label>
+    <input type="file" id="gpx" accept=".gpx" disabled>
+  </div>
+  <div class="control-row">
+    <label for="smooth">Elevation smoothing (m): <span id="smooth-val">50</span></label>
+    <input type="range" id="smooth" min="0" max="1000" value="50" step="10" disabled>
+  </div>
+  <div class="control-row">
+    <label for="time">Target total time (hh:mm:ss):</label>
+    <input type="text" id="time" value="02:00:00" pattern="\d+:\d{2}:\d{2}" size="10" disabled>
+  </div>
+  <div class="control-row">
+    <label for="gap">Target average GAP (mm:ss/mi):</label>
+    <input type="text" id="gap" value="10:00" pattern="\d+:\d{2}" size="7" disabled>
+  </div>
+  <div class="control-row">
+    <label for="fatigue">Fatigue (% GAP decay per hour):</label>
+    <input type="number" id="fatigue" value="0" min="0" max="50" step="0.5" size="5" disabled>
+  </div>
+  <div class="control-row">
+    <label for="show-derived-gap">Show pace ÷ gap_factor (sanity check):</label>
+    <input type="checkbox" id="show-derived-gap" disabled>
+  </div>
+</div>
 
+<div id="status">Loading Python runtime (this takes a few seconds on first load)…</div>
+<div id="plot"></div>
 
-					<br>
-					<b>email:</b> mike dot grudic at gmail dot com <br>
-					<!-- <b>office:</b> Office 8061, 1800 Sherman Ave, Evanston IL <br> -->
+<script type="module">
+let pyodide = null;
+let renderInFlight = false;
+let pendingRender = false;
 
-					<br>
-					<a href="https://ui.adsabs.harvard.edu/search/q=-docs(56c4b65ab1a1a3f16a18c35f08f32a2c)%20-docs(f1eaa9e10da61265795efb741437a00c)%20author%3A%22Grudich%22%20OR%20author%3A%22Grudic%22%20OR%20author%3A%22Grudi%C4%87%22&sort=date%20desc%2C%20bibcode%20desc&p_=0"
-						target="_blank" class="button large">Publications</a>
-				</div>
-			</div>
-		</div>
-	</article>
+async function init() {
+  pyodide = await loadPyodide();
+  setStatus("Loading numpy and matplotlib…");
+  await pyodide.loadPackage(["numpy", "matplotlib"]);
 
+  setStatus("Fetching library files…");
+  const bust = `?v=${Date.now()}`;
+  const gapBuf = await (await fetch("strava_GAP_table.dat" + bust)).arrayBuffer();
+  pyodide.FS.writeFile("strava_GAP_table.dat", new Uint8Array(gapBuf));
+  const libSrc = await (await fetch("elevation_profile.py" + bust)).text();
+  pyodide.FS.writeFile("elevation_profile.py", libSrc);
 
-
-	<!-- Work -->
-	<article id="work" class="wrapper style2">
-		<div class="container">
-			<header>
-				<h2>Research</h2>
-				<!-- <img src="images/wordcloud.png" alt="" /> -->
-				<p>I like to work on a variety of problems in astrophysics, with a focus upon numerical simulations and
-					computational theory.</p>
-			</header>
-			<div class="row aln-center">
-				<div class="col-4 col-6-medium col-12-small">
-					<section class="box style1">
-						<a href="https://ui.adsabs.harvard.edu/public-libraries/it-cRKy4QviLVMjzKN6DMw"
-							class="image featured"><img src="images/clusters.png" alt="" /></a>
-
-						<!-- <span class="image featured"><img src="images/clusters.png" alt="" /></span> -->
-						<h3>Star Cluster Formation</h3>
-						<p>The main problem I've worked on is how stars and star clusters form in giant molecular
-							clouds. Gravity, MHD, atomic/molecular physics, and crucially stellar feedback all play a
-							role, and we can use numerical simulations to disentangle these physics. These processes are
-							a key uncertain piece of microphysics in galaxy formation, and give rise to the population
-							of globular clusters, which carry important clues about our Galaxy's ancient history.</p>
-					</section>
-				</div>
-				<div class="col-4 col-6-medium col-12-small">
-					<section class="box style1">
-
-						<a href="https://ui.adsabs.harvard.edu/public-libraries/uuSTbJGOSMS6Yjg0_0SJlg"
-							class="image featured"><img src="images/gizmo.png" alt="" /></a>
-						<h3>Numerical Methods</h3>
-						<p>I like to come up with ways to make astrophysical simulations more realistic, more efficient,
-							and more adaptive. </p>
-					</section>
-				</div>
-				<div class="col-4 col-6-medium col-12-small">
-					<section class="box style1">
-						<a href="https://ui.adsabs.harvard.edu/public-libraries/ooM6s8CpSv6fv26UaKT6qQ"
-							class="image featured"><img src="images/imf.png" alt="" /></a>
-						<h3>The IMF</h3>
-						<p>The initial mass function of stars is a fundamentally important quantity in practically all
-							fields of astrophysics. In my own work on GMCs and star clusters, the details of where and
-							how individual stars form are now the leading-order uncertainty. And yet what physics are
-							responsible for it, and how it is expected to vary, remain deeply uncertain. My
-							collaboration is working on the <a href="http://starforge.space">next generation of
-								self-consistent star formation simulations</a>, which will serve as a virtual laboratory
-							for mapping out the physical origins of the IMF in realistic GMCs.</p>
-					</section>
-				</div>
-			</div>
-
-			<div class="row aln-center">
-				<div class="col-4 col-6-medium col-12-small">
-					<section class="box style1">
-						<a href="https://ui.adsabs.harvard.edu/public-libraries/BrWbsueWRYyGJLropAnfzA"
-							class="image featured"><img src="images/orion.jpg" alt="" /></a>
-						<h3>Giant Molecular Clouds</h3>
-						<p>Giant molecular clouds are the progenitors of stars and star clusters in our Galaxy. I would
-							like to understand their lifecycle: how they form, how their properties influence star
-							formation, and how they disperse.</p>
-					</section>
-				</div>
-				<div class="col-4 col-6-medium col-12-small">
-					<section class="box style1">
-						<!-- <span class="image fit"><img src="images/turbulence.png" alt="" /></span> -->
-						<a href="https://ui.adsabs.harvard.edu/public-libraries/v8eX6ydEQjq60Oa47mUH4A"
-							class="image featured"><img src="images/turbulence.png" alt="" /></a>
-
-						<h3>Turbulence</h3>
-						<p>Most baryonic matter in the Universe is in a state of magnetohydrodynamic turbulence. I want
-							to understand how the properties of astrophysical systems emerge from the behaviour of
-							turbulence. Particularly important for star formation is understanding exactly how gravity
-							and feedback alter and drive turbulence.</p>
-					</section>
-				</div>
-				<div class="col-4 col-6-medium col-12-small">
-					<section class="box style1">
-
-						<a href="https://ui.adsabs.harvard.edu/public-libraries/yjKt2Mm-QaGqDttwscqTRg"
-							class="image featured"><img src="images/fire.png" alt="" /></a>
-						<h3>Galaxy formation</h3>
-						<p>I am a regular contributor to the <a href="https://www.fire.northwestern.edu">FIRE</a>
-							collaboration, working on high-resolution cosmological zoom-in simulations that resolve the
-							multi-phase ISM and stellar feedback processes. I am using my high-resolution GMC
-							simulations to calibrate the next generation of star formation prescriptions, extending
-							galaxy simulations' predictive power into dense gas.</p>
-					</section>
-				</div>
-			</div>
-			<!-- <footer> -->
-			<!-- 	<p>Lorem ipsum dolor sit sapien vestibulum ipsum primis?</p> -->
-			<!-- 	<a href="#portfolio" class="button large scrolly">See some of my recent work</a> -->
-			<!-- </footer> -->
-		</div>
-	</article>
-
-	<!-- Portfolio -->
-	<article id="portfolio" class="wrapper style3">
-		<div class="container">
-			<header>
-				<h2>Software</h2>
-				<p>I am a perpertual tinkerer and wheel-reinventor: having a hard time trusting black boxes, I try and
-					learn the guts of computational techniques and do them myself. Sometimes usable software is the
-					product. Sometimes it's even good! If you have any suggestions or questions about any of these,
-					please don't hesistate to get in touch. Most of my codes have benefited greatly from community
-					feedback.</p>
-			</header>
-			<div class="row">
-				<div class="col-4 col-6-medium col-12-small">
-					<article class="box style2">
-						<a href="https://www.github.com/mikegrudic/CrunchSnaps" class="image featured"><img
-								src="images/crunchsnaps.png" alt="" /></a>
-						<h3><a href="https://www.github.com/mikegrudic/CrunchSnaps">CrunchSnaps</a></h3>
-						<p>CrunchSnaps renders publication-quality images and movies from
-							GIZMO simulation snapshots, with support for custom field expressions,
-							derived fields, and arbitrary camera trajectories.</p>
-					</article>
-				</div>
-				<div class="col-4 col-6-medium col-12-small">
-					<article class="box style2">
-						<a href="https://www.github.com/mikegrudic/jaco" class="image featured"><img
-								src="images/jaco.png" alt="" /></a>
-						<h3><a href="https://www.github.com/mikegrudic/jaco">jaco</a></h3>
-						<p>jaco is a flexible, object-oriented implementation of ISM microphysics
-							and chemistry equations with JAX-based solvers, supporting symbolic
-							equation composition, automatic Jacobians, and GPU-accelerated
-							rootfinding.</p>
-					</article>
-				</div>
-				<div class="col-4 col-6-medium col-12-small">
-					<article class="box style2">
-						<a href="https://www.github.com/mikegrudic/vizmo" class="image featured"><img
-								src="images/vizmo.png" alt="" /></a>
-						<h3><a href="https://www.github.com/mikegrudic/vizmo">vizmo</a></h3>
-						<p>vizmo is a real-time 3D fly-through explorer for unstructured
-							simulation data, rendering interactive surface density maps and
-							composite visualizations on the GPU via WebGPU.</p>
-					</article>
-				</div>
-				<div class="col-4 col-6-medium col-12-small">
-					<article class="box style2">
-						<a href="https://www.github.com/mikegrudic/pytreegrav" class="image featured"><img
-								src="images/tree.png" alt="" /></a>
-						<h3><a href="https://www.github.com/mikegrudic/pytreegrav">pytreegrav</a></h3>
-						<p>pytreegrav is a fast, OpenMP-parallel Barnes-Hut style tree-code for computing gravitational
-							potentials and fields from particle data implemented entirely in python. With numba as its
-							backend, it can crunch forces/potentials at a rate that is nearly competitive with
-							state-of-the-art N-body codes.</p>
-					</article>
-				</div>
-				<div class="col-4 col-6-medium col-12-small">
-					<article class="box style2">
-						<a href="https://www.github.com/mikegrudic/meshoid" class="image featured"><img
-								src="images/meshoid.png" alt="" /></a>
-						<h3><a href="https://www.github.com/mikegrudic/meshoid">meshoid</a></h3>
-						<p>meshoid (MESHless Operations such as Integrals and Derivatives) is a multi-purpose tool for
-							performing a variety of useful operations for analyzing or visualizing meshless or
-							unstructured mesh simulation data.</p>
-					</article>
-				</div>
-				<div class="col-4 col-6-medium col-12-small">
-					<article class="box style2">
-						<a href="https://www.github.com/mikegrudic/MakeCloud" class="image featured"><img
-								src="images/makecloud.png" alt="" /></a>
-						<h3><a href="https://www.github.com/mikegrudic/MakeCloud">MakeCloud</a></h3>
-						<p>MakeCloud is an initial conditions generator for GMC simulations, which can include initial
-							turbulent velocity and magnetic fields with an arbitrary mixture of compressive and
-							solenoidal modes. Compressive magnetic fields not recommended.</p>
-					</article>
-				</div>
-				<div class="col-4 col-6-medium col-12-small">
-					<article class="box style2">
-						<a href="https://www.github.com/mikegrudic/CloudPhinder" class="image featured"><img
-								src="images/cloudphinder.png" alt="" /></a>
-						<h3><a href="https://www.github.com/mikegrudic/CloudPhinder">CloudPhinder</a></h3>
-						<p>CloudPhinder uses an algorithm related to the Subfind algorithm to identify self-gravitating
-							gas structures (ie. the progenitors of star clusters) in galaxy simulation data.</p>
-					</article>
-				</div>
-				<div class="col-4 col-6-medium col-12-small">
-					<article class="box style2">
-						<a href="#" class="image featured"><img src="images/gizmo.jpeg" alt="" /></a>
-						<h3><a href="http://www.tapir.caltech.edu/~phopkins/Site/GIZMO.html">GIZMO</a></h3>
-						<p>I am a frequent contributor to the GIZMO multi-method astrophysical radiation MHD code,
-							mainly working on its sink particle and feedback coupling algorithms for <a
-								href="http://starforge.space">star formation</a> and cosmological black hole
-							simulations.</p>
-					</article>
-				</div>
-			</div>
-			<!-- <footer> -->
-			<!-- 	<p>Lorem ipsum dolor sit sapien vestibulum ipsum primis?</p> -->
-			<!-- 	<a href="#contact" class="button large scrolly">Get in touch with me</a> -->
-			<!-- </footer> -->
-		</div>
-	</article>
-
-	<article id="aboutme" class="wrapper style3">
-		<div class="container">
-			<header>
-				<h2>About Me</h2>
-
-				<span class="image left2"><img src="images/me5.jpg" alt="" /> Me in the sort of place I usually like to be.  </span> <p> I come from the island of <a
-					href="https://en.wikipedia.org/wiki/Newfoundland_and_Labrador">Newfoundland</a> in Canada. I never
-				much cared for science until my first year of university, when I was inspired by Carl Sagan, Stephen
-				Hawking, Richard Feynman (I know, I know) and my first look at the Orion Nebula through a telescope. From then on I was hooked on physics
-				and astronomy. I switched to a joint degree in physics and applied mathematics at Memorial University of
-				Newfoundland, completing my undergraduate dissertation on relativistic gravitational scattering with Dr.
-				John Lewis. I then went to grad school at Caltech and got into star formation theory while working with
-				Dr. Phil Hopkins, eventually resulting in my doctoral dissertation, "The Role of Stellar Feedback in
-				Star Cluster Formation". As a postdoctoral fellow at Northwestern University I co-founded STARFORGE with
-				my grad school buddy David Guszejnov, and I carried on this work as a Hubble Fellow at Carnegie and now as an Associate Research Scientist - Software at Flatiron!
-				<br> <br>
+  pyodide.runPython(`
+import base64
+import io
+import matplotlib
+matplotlib.use("Agg")
+import numpy as np
+from matplotlib import pyplot as plt
+from matplotlib.ticker import FuncFormatter, MultipleLocator, FixedLocator, NullLocator
+from elevation_profile import ElevationProfile
 
 
-
-				I try to practice uncompromised honesty and candor in my science.
-				We are tackling tough problems not to be solved overnight, with an endless supply of dead-ends that
-				get
-				the right answer for the wrong reasons. For me, the best approach is to stay grounded, be
-				realistic
-				about the limitations
-				of
-				our
-				models, and apply physical intuition and thought experiments to the code and equations.
-				<br> <br>
-
-				When not being a physicist or a computer-toucher I like <a href="https://www.strava.com/athletes/153160834">power-hiking up hills and eating lots of snacks</a>. Sometimes I even attempt to be <a href="https://ultrasignup.com/results_participant.aspx?fname=Mike&lname=Grudic">speedy</a> in the mountains. Other times I stay home to be a <a href="https://www.zwift.com/athlete/7614263?">hamster on a wheel</a>.
-				<br> <br>
+def _format_clock(total_seconds):
+    total_seconds = max(0, int(round(total_seconds)))
+    h, rem = divmod(total_seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
 
 
-		</div>
-	</article>
+def _pace_tick(min_per_mi, _pos):
+    if not np.isfinite(min_per_mi) or min_per_mi < 0:
+        return ""
+    return _format_clock(min_per_mi * 60)
 
+_state = {"bytes": None, "smoothing": 50.0, "total_time_minutes": 120.0, "fatigue_rate_per_hour": 0.0, "show_derived_gap": False}
 
-	<!-- Scripts -->
-	<script src="assets/js/jquery.min.js"></script>
-	<script src="assets/js/jquery.scrolly.min.js"></script>
-	<script src="assets/js/browser.min.js"></script>
-	<script src="assets/js/breakpoints.min.js"></script>
-	<script src="assets/js/util.js"></script>
-	<script src="assets/js/main.js"></script>
+M_TO_MI = 0.0006213711922
+M_TO_FT = 3.280839895
+
+def set_bytes(b):
+    _state["bytes"] = bytes(b)
+
+def set_smoothing(s):
+    _state["smoothing"] = float(s)
+
+def set_total_time(minutes):
+    _state["total_time_minutes"] = float(minutes)
+
+def set_show_derived_gap(flag):
+    _state["show_derived_gap"] = bool(flag)
+
+def set_fatigue(rate_per_hour):
+    _state["fatigue_rate_per_hour"] = float(rate_per_hour)
+
+def _total_effort_mi(profile, distance_mi):
+    avg_factor = 0.5 * (profile.gap_factor[:-1] + profile.gap_factor[1:])
+    return float(np.sum(avg_factor * np.diff(distance_mi)))
+
+# Men's world records, (distance_mi, pace_min_per_mi)
+WR_ANCHORS = (
+    (3.10686, 4.0517),   # 5K: Cheptegei 12:35
+    (26.2188, 4.5990),   # Marathon: Kiptum 2:00:35
+    (50.0, 5.7672),      # 50 mi: Lawrence 4:48:21
+    (62.137, 5.8840),    # 100 km: Sorokin 6:05:35
+    (100.0, 6.5100),     # 100 mi: Sorokin ~10:51
+)
+
+def _world_record_pace_min_per_mi(distance_mi):
+    """Rough men's world-record pace (min/mi) at the given distance,
+    via piecewise-linear interpolation in log-log space through the
+    5K / marathon / 100-mi anchors. Extrapolates linearly in log-log
+    outside that range."""
+    log_ds = np.log10([a[0] for a in WR_ANCHORS])
+    log_ps = np.log10([a[1] for a in WR_ANCHORS])
+    log_d = np.log10(distance_mi)
+    if log_d < log_ds[0]:
+        slope = (log_ps[1] - log_ps[0]) / (log_ds[1] - log_ds[0])
+        log_p = log_ps[0] + slope * (log_d - log_ds[0])
+    elif log_d > log_ds[-1]:
+        slope = (log_ps[-1] - log_ps[-2]) / (log_ds[-1] - log_ds[-2])
+        log_p = log_ps[-1] + slope * (log_d - log_ds[-1])
+    else:
+        log_p = float(np.interp(log_d, log_ds, log_ps))
+    return float(10 ** log_p)
+
+def default_initial_time_minutes():
+    """Default total time: half-world-record pace applied to the
+    GAP-adjusted distance. Returns None if no GPX is loaded."""
+    if _state["bytes"] is None:
+        return None
+    profile = ElevationProfile.from_gpx(
+        io.BytesIO(_state["bytes"]),
+        smoothing_length=_state["smoothing"],
+    )
+    distance_mi = profile.distance * M_TO_MI
+    effort = _total_effort_mi(profile, distance_mi)
+    wr_pace = _world_record_pace_min_per_mi(effort)
+    return 2.0 * wr_pace * effort
+
+def total_effort_mi_current():
+    """Effort-weighted distance (mi) of the loaded GPX at the current
+    smoothing setting. Returns None if no GPX has been loaded."""
+    if _state["bytes"] is None:
+        return None
+    profile = ElevationProfile.from_gpx(
+        io.BytesIO(_state["bytes"]),
+        smoothing_length=_state["smoothing"],
+    )
+    distance_mi = profile.distance * M_TO_MI
+    return _total_effort_mi(profile, distance_mi)
+
+def render():
+    if _state["bytes"] is None:
+        return ""
+    profile = ElevationProfile.from_gpx(
+        io.BytesIO(_state["bytes"]),
+        smoothing_length=_state["smoothing"],
+    )
+    distance_mi = profile.distance * M_TO_MI
+    elevation_ft = profile.elevation * M_TO_FT
+    gain_ft = float(np.sum(np.maximum(0.0, np.diff(elevation_ft))))
+    split_minutes = profile.constant_gap_split_time(
+        _state["total_time_minutes"],
+        fatigue_rate_per_hour=_state["fatigue_rate_per_hour"],
+    )
+    split_hours = split_minutes / 60.0
+    pace_min_per_mi_series = np.gradient(split_minutes, distance_mi)
+
+    fig, axes = plt.subplots(3, 2, figsize=(14, 10), sharex="all")
+    ax_elev = axes[0, 0]
+    ax_grade = axes[0, 1]
+    ax_gap = axes[1, 0]
+    ax_pace = axes[1, 1]
+    ax_split = axes[2, 0]
+    ax_vspeed = axes[2, 1]
+
+    vspeed_ft_per_h = np.gradient(elevation_ft, split_hours)
+
+    ax_elev.plot(distance_mi, elevation_ft, lw=1, color="black")
+    ax_elev.set_ylabel("Elevation (ft)")
+
+    ax_grade.plot(distance_mi, profile.grade, lw=0.7, color="black")
+    ax_grade.axhline(0, color="k", lw=0.3)
+    ax_grade.set_ylabel("Grade (%)")
+
+    ax_gap.plot(distance_mi, profile.gap_factor, lw=0.7, color="black")
+    ax_gap.axhline(1, color="k", lw=0.3)
+    ax_gap.set_ylabel("Relative effort per mile")
+
+    ax_pace.plot(distance_mi, pace_min_per_mi_series, lw=0.8, color="black", label="actual")
+    if _state["show_derived_gap"]:
+        derived_gap_series = pace_min_per_mi_series / profile.gap_factor
+        ax_pace.plot(distance_mi, derived_gap_series, lw=0.8, color="black", ls="--", label="pace ÷ gap_factor")
+        ax_pace.legend(loc="best", fontsize=8)
+    ax_pace.set_yscale("log")
+    ax_pace.invert_yaxis()
+    ax_pace.set_ylabel("Pace (min:sec/mi)")
+    pace_ticks = [4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 45, 60, 90, 120, 180]
+    ax_pace.yaxis.set_major_locator(FixedLocator(pace_ticks))
+    ax_pace.yaxis.set_minor_locator(NullLocator())
+    ax_pace.yaxis.set_major_formatter(FuncFormatter(_pace_tick))
+
+    ax_split.plot(distance_mi, split_hours, lw=1, color="black")
+    ax_split.set_ylabel("Elapsed time (h)")
+
+    ax_vspeed.plot(distance_mi, vspeed_ft_per_h, lw=0.7, color="black")
+    ax_vspeed.axhline(0, color="k", lw=0.3)
+    ax_vspeed.set_ylabel("Vertical speed (ft/h)")
+
+    for ax in (ax_elev, ax_grade, ax_gap, ax_pace, ax_split, ax_vspeed):
+        ax.xaxis.set_major_locator(MultipleLocator(1.0))
+        ax.set_xlim(0, distance_mi[-1])
+        ax.set_xlabel("Distance (mi)")
+        ax.tick_params(labelbottom=True)
+        ax.grid(alpha=0.3)
+
+    fig.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=100)
+    plt.close(fig)
+    img_src = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    pace_min_per_mi = _state["total_time_minutes"] / distance_mi[-1]
+    pace_min = int(pace_min_per_mi)
+    pace_sec = int(round((pace_min_per_mi - pace_min) * 60))
+    if pace_sec == 60:
+        pace_min += 1
+        pace_sec = 0
+
+    total_effort_mi = _total_effort_mi(profile, distance_mi)
+    gap_pace_min_per_mi = _state["total_time_minutes"] / total_effort_mi
+    gap_min = int(gap_pace_min_per_mi)
+    gap_sec = int(round((gap_pace_min_per_mi - gap_min) * 60))
+    if gap_sec == 60:
+        gap_min += 1
+        gap_sec = 0
+
+    metrics_html = (
+        "<div class='metrics'>"
+        f"<span><strong>{distance_mi[-1]:.2f} mi</strong>Distance</span>"
+        f"<span><strong>{total_effort_mi:.2f} mi</strong>GAP-adjusted distance</span>"
+        f"<span><strong>{gain_ft:,.0f} ft</strong>Total gain</span>"
+        f"<span><strong>{profile.grade.min():+.1f} / {profile.grade.max():+.1f} %</strong>Grade range</span>"
+        f"<span><strong>{float(np.median(profile.gap_factor)):.2f}&times;</strong>Median GAP factor</span>"
+        f"<span><strong>{pace_min}:{pace_sec:02d} /mi</strong>Average pace</span>"
+        f"<span><strong>{gap_min}:{gap_sec:02d} /mi</strong>Average GAP</span>"
+        "</div>"
+    )
+
+    finish_mi = distance_mi[-1]
+    mile_marks = list(np.arange(1.0, np.floor(finish_mi) + 1.0))
+    if not mile_marks or finish_mi - mile_marks[-1] > 1e-3:
+        mile_marks.append(finish_mi)
+    mile_marks = np.array(mile_marks)
+    times_at_marks = np.interp(mile_marks, distance_mi, split_minutes)
+    prev_times = np.concatenate(([0.0], times_at_marks[:-1]))
+    prev_marks = np.concatenate(([0.0], mile_marks[:-1]))
+    split_durations = times_at_marks - prev_times
+    segment_lengths_mi = mile_marks - prev_marks
+
+    segment_gain_ft = []
+    for prev_m, mile in zip(prev_marks, mile_marks):
+        interior_mask = (distance_mi > prev_m) & (distance_mi < mile)
+        elev_start = float(np.interp(prev_m, distance_mi, elevation_ft))
+        elev_end = float(np.interp(mile, distance_mi, elevation_ft))
+        seg_elev = np.concatenate(([elev_start], elevation_ft[interior_mask], [elev_end]))
+        segment_gain_ft.append(float(np.sum(np.maximum(0.0, np.diff(seg_elev)))))
+
+    rows = []
+    for mile, dur_min, cum_min, seg_mi, gain in zip(mile_marks, split_durations, times_at_marks, segment_lengths_mi, segment_gain_ft):
+        if abs(mile - round(mile)) < 1e-6:
+            label = f"{int(round(mile))}"
+        else:
+            label = f"{mile:.2f}"
+        pace_str = _format_clock((dur_min / seg_mi) * 60) if seg_mi > 0 else "—"
+        rows.append(
+            "<tr>"
+            f"<td>{label}</td>"
+            f"<td>{gain:,.0f}</td>"
+            f"<td>{_format_clock(dur_min * 60)}</td>"
+            f"<td>{pace_str}</td>"
+            f"<td>{_format_clock(cum_min * 60)}</td>"
+            "</tr>"
+        )
+    table_html = (
+        "<div class='results-splits'>"
+        "<h2>Mile splits</h2>"
+        "<table class='splits'>"
+        "<thead><tr><th>Mile</th><th>Gain (ft)</th><th>Split</th><th>Pace (min/mi)</th><th>Cumulative</th></tr></thead>"
+        "<tbody>" + "".join(rows) + "</tbody></table>"
+        "</div>"
+    )
+
+    return (
+        metrics_html
+        + "<div class='results-row'>"
+        + f"<div class='results-plot'><img src='{img_src}'></div>"
+        + table_html
+        + "</div>"
+    )
+  `);
+
+  bindEvents();
+  setStatus("Ready. Upload a GPX file to begin.");
+  document.getElementById("gpx").disabled = false;
+  document.getElementById("smooth").disabled = false;
+  document.getElementById("time").disabled = false;
+  document.getElementById("gap").disabled = false;
+  document.getElementById("fatigue").disabled = false;
+  document.getElementById("show-derived-gap").disabled = false;
+}
+
+function parseHMS(s) {
+  const m = /^\s*(\d+):(\d{1,2}):(\d{1,2})\s*$/.exec(s);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const mm = parseInt(m[2], 10);
+  const ss = parseInt(m[3], 10);
+  if (mm > 59 || ss > 59) return null;
+  return h * 60 + mm + ss / 60;
+}
+
+function formatHMS(minutes) {
+  const totalSec = Math.max(0, Math.round(minutes * 60));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function parseMS(s) {
+  const m = /^\s*(\d+):(\d{1,2})\s*$/.exec(s);
+  if (!m) return null;
+  const min = parseInt(m[1], 10);
+  const sec = parseInt(m[2], 10);
+  if (sec > 59) return null;
+  return min + sec / 60;
+}
+
+function formatMS(minutes) {
+  const totalSec = Math.max(0, Math.round(minutes * 60));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function setStatus(msg) {
+  document.getElementById("status").textContent = msg;
+}
+
+function bindEvents() {
+  document.getElementById("gpx").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const buf = await file.arrayBuffer();
+    pyodide.globals.get("set_bytes")(new Uint8Array(buf));
+    const defaultMin = pyodide.globals.get("default_initial_time_minutes")();
+    if (defaultMin !== null) {
+      document.getElementById("time").value = formatHMS(defaultMin);
+      const totalEffort = pyodide.globals.get("total_effort_mi_current")();
+      if (totalEffort !== null && totalEffort > 0) {
+        document.getElementById("gap").value = formatMS(defaultMin / totalEffort);
+      }
+      pyodide.globals.get("set_total_time")(defaultMin);
+    }
+    scheduleRender();
+  });
+
+  const slider = document.getElementById("smooth");
+  const label = document.getElementById("smooth-val");
+  slider.addEventListener("input", () => {
+    label.textContent = slider.value;
+  });
+  slider.addEventListener("change", () => {
+    pyodide.globals.get("set_smoothing")(parseFloat(slider.value));
+    scheduleRender();
+  });
+
+  const timeInput = document.getElementById("time");
+  const gapInput = document.getElementById("gap");
+
+  timeInput.addEventListener("change", () => {
+    const minutes = parseHMS(timeInput.value);
+    if (minutes === null) {
+      setStatus("Invalid time format — use hh:mm:ss.");
+      return;
+    }
+    pyodide.globals.get("set_total_time")(minutes);
+    const totalEffort = pyodide.globals.get("total_effort_mi_current")();
+    if (totalEffort !== null && totalEffort > 0) {
+      gapInput.value = formatMS(minutes / totalEffort);
+    }
+    scheduleRender();
+  });
+
+  document.getElementById("show-derived-gap").addEventListener("change", (e) => {
+    pyodide.globals.get("set_show_derived_gap")(e.target.checked);
+    scheduleRender();
+  });
+
+  document.getElementById("fatigue").addEventListener("change", (e) => {
+    const pct = parseFloat(e.target.value);
+    if (!isFinite(pct) || pct < 0) {
+      setStatus("Invalid fatigue rate.");
+      return;
+    }
+    pyodide.globals.get("set_fatigue")(pct / 100.0);
+    scheduleRender();
+  });
+
+  gapInput.addEventListener("change", () => {
+    const gapPace = parseMS(gapInput.value);
+    if (gapPace === null) {
+      setStatus("Invalid GAP format — use mm:ss.");
+      return;
+    }
+    const totalEffort = pyodide.globals.get("total_effort_mi_current")();
+    if (totalEffort === null) {
+      setStatus("Upload a GPX file first.");
+      return;
+    }
+    const totalMin = gapPace * totalEffort;
+    timeInput.value = formatHMS(totalMin);
+    pyodide.globals.get("set_total_time")(totalMin);
+    scheduleRender();
+  });
+}
+
+async function scheduleRender() {
+  if (renderInFlight) {
+    pendingRender = true;
+    return;
+  }
+  renderInFlight = true;
+  try {
+    setStatus("Rendering…");
+    const html = pyodide.globals.get("render")();
+    if (html) {
+      document.getElementById("plot").innerHTML = html;
+      setStatus("");
+    }
+  } catch (e) {
+    setStatus("Error: " + e.message);
+    console.error(e);
+  } finally {
+    renderInFlight = false;
+    if (pendingRender) {
+      pendingRender = false;
+      scheduleRender();
+    }
+  }
+}
+
+init().catch((e) => {
+  setStatus("Failed to initialize: " + e.message);
+  console.error(e);
+});
+</script>
 
 </body>
-
 </html>
