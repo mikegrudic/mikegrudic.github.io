@@ -23,6 +23,7 @@
   table.splits th, table.splits td { padding: 0.3em 0.9em; text-align: right; border-bottom: 1px solid #ddd; }
   table.splits th { background: #f4f4f4; }
   table.splits td:first-child, table.splits th:first-child { text-align: left; }
+  table.splits tr.waypoint { background: #fff7d6; font-style: italic; }
 </style>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
 </head>
@@ -66,6 +67,14 @@ Note that the grade-adjustment model (the same as used by Strava) is calibrated 
       <option value="metric">Metric (km, m)</option>
     </select>
   </div>
+  <div class="control-row">
+    <label for="splits-mode">Splits:</label>
+    <select id="splits-mode" disabled>
+      <option value="distance" selected>Distance only</option>
+      <option value="distance-waypoints">Distance + waypoints</option>
+      <option value="waypoints">Waypoints only</option>
+    </select>
+  </div>
   <!--
   <div class="control-row">
     <label for="show-derived-gap">Show pace ÷ gap_factor (sanity check):</label>
@@ -104,7 +113,7 @@ matplotlib.use("Agg")
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.ticker import FuncFormatter, MultipleLocator, FixedLocator, NullLocator
-from elevation_profile import ElevationProfile
+from elevation_profile import ElevationProfile, parse_waypoints, _haversine
 
 
 def _format_clock(total_seconds):
@@ -121,7 +130,7 @@ def _pace_tick(min_per_mi, _pos):
         return ""
     return _format_clock(min_per_mi * 60)
 
-_state = {"bytes": None, "smoothing": 50.0, "total_time_minutes": 120.0, "fatigue_rate_per_hour": 0.0, "show_derived_gap": False, "units": "imperial"}
+_state = {"bytes": None, "smoothing": 50.0, "total_time_minutes": 120.0, "fatigue_rate_per_hour": 0.0, "show_derived_gap": False, "units": "imperial", "splits_mode": "distance"}
 
 M_TO_MI = 0.0006213711922
 M_TO_FT = 3.280839895
@@ -146,6 +155,10 @@ def set_fatigue(rate_per_hour):
 def set_units(units):
     if units in ("imperial", "metric"):
         _state["units"] = units
+
+def set_splits_mode(mode):
+    if mode in ("distance", "distance-waypoints", "waypoints"):
+        _state["splits_mode"] = mode
 
 def _total_effort_mi(profile, distance_mi):
     avg_factor = 0.5 * (profile.gap_factor[:-1] + profile.gap_factor[1:])
@@ -332,33 +345,55 @@ def render():
     )
 
     finish_unit = distance[-1]
-    unit_marks = list(np.arange(1.0, np.floor(finish_unit) + 1.0))
-    if not unit_marks or finish_unit - unit_marks[-1] > 1e-3:
-        unit_marks.append(finish_unit)
-    unit_marks = np.array(unit_marks)
-    times_at_marks = np.interp(unit_marks, distance, split_minutes)
-    prev_times = np.concatenate(([0.0], times_at_marks[:-1]))
-    prev_marks = np.concatenate(([0.0], unit_marks[:-1]))
-    split_durations = times_at_marks - prev_times
-    segment_lengths = unit_marks - prev_marks
+    splits_mode = _state["splits_mode"]
 
-    segment_gain = []
-    for prev_m, mark in zip(prev_marks, unit_marks):
-        interior_mask = (distance > prev_m) & (distance < mark)
-        elev_start = float(np.interp(prev_m, distance, elevation))
-        elev_end = float(np.interp(mark, distance, elevation))
+    # Collect waypoint marks (used by both -waypoints modes)
+    waypoint_marks = []  # list of (distance_in_units, label_with_mileage)
+    if splits_mode in ("distance-waypoints", "waypoints"):
+        for wp_lat, wp_lon, name in parse_waypoints(io.BytesIO(_state["bytes"])):
+            d_to_route = _haversine(wp_lat, wp_lon, profile.latitude, profile.longitude)
+            idx = int(np.argmin(d_to_route))
+            if d_to_route[idx] < 500.0:
+                wp_dist = float(distance[idx])
+                label = f"{name} ({wp_dist:.2f} {dist_unit})"
+                waypoint_marks.append((wp_dist, label))
+        waypoint_marks.sort(key=lambda x: x[0])
+
+    # Marks that act as splits (full row with gain/split/pace).
+    split_marks = []  # list of (distance, label, is_waypoint_styled)
+    if splits_mode in ("distance", "distance-waypoints"):
+        for m in range(1, int(np.floor(finish_unit)) + 1):
+            split_marks.append((float(m), str(m), False))
+        if not split_marks or finish_unit - split_marks[-1][0] > 1e-3:
+            split_marks.append((float(finish_unit), f"{finish_unit:.2f}", False))
+    else:  # waypoints-only
+        for d, name in waypoint_marks:
+            split_marks.append((d, name, True))
+        # Add an implicit Finish row so the last segment is accounted for.
+        if not split_marks or finish_unit - split_marks[-1][0] > 1e-3:
+            split_marks.append((float(finish_unit), "Finish", False))
+
+    # Info-only marks (just cumulative time, used only in distance+waypoints mode).
+    info_marks = []  # list of (distance, label)
+    if splits_mode == "distance-waypoints":
+        info_marks = list(waypoint_marks)
+
+    table_entries = []
+    prev_split_dist = 0.0
+    for mark_d, label, is_wp_styled in split_marks:
+        cum_min = float(np.interp(mark_d, distance, split_minutes))
+        seg_len = mark_d - prev_split_dist
+        prev_cum = float(np.interp(prev_split_dist, distance, split_minutes)) if prev_split_dist > 0 else 0.0
+        dur_min = cum_min - prev_cum
+        interior_mask = (distance > prev_split_dist) & (distance < mark_d)
+        elev_start = float(np.interp(prev_split_dist, distance, elevation))
+        elev_end = float(np.interp(mark_d, distance, elevation))
         seg_elev = np.concatenate(([elev_start], elevation[interior_mask], [elev_end]))
-        segment_gain.append(float(np.sum(np.maximum(0.0, np.diff(seg_elev)))))
-
-    rows = []
-    for mark, dur_min, cum_min, seg_len, gain in zip(unit_marks, split_durations, times_at_marks, segment_lengths, segment_gain):
-        if abs(mark - round(mark)) < 1e-6:
-            label = f"{int(round(mark))}"
-        else:
-            label = f"{mark:.2f}"
+        gain = float(np.sum(np.maximum(0.0, np.diff(seg_elev))))
         pace_str = _format_clock((dur_min / seg_len) * 60) if seg_len > 0 else "—"
-        rows.append(
-            "<tr>"
+        cls = " class='waypoint'" if is_wp_styled else ""
+        row = (
+            f"<tr{cls}>"
             f"<td>{label}</td>"
             f"<td>{gain:,.0f}</td>"
             f"<td>{_format_clock(dur_min * 60)}</td>"
@@ -366,6 +401,22 @@ def render():
             f"<td>{_format_clock(cum_min * 60)}</td>"
             "</tr>"
         )
+        table_entries.append((mark_d, row))
+        prev_split_dist = mark_d
+
+    for wp_dist, name in info_marks:
+        cum_min = float(np.interp(wp_dist, distance, split_minutes))
+        row = (
+            "<tr class='waypoint'>"
+            f"<td>{name}</td>"
+            "<td>—</td><td>—</td><td>—</td>"
+            f"<td>{_format_clock(cum_min * 60)}</td>"
+            "</tr>"
+        )
+        table_entries.append((wp_dist, row))
+
+    table_entries.sort(key=lambda x: x[0])
+    rows = [entry[1] for entry in table_entries]
     splits_heading = "Kilometer splits" if metric else "Mile splits"
     mark_header = "Km" if metric else "Mile"
     table_html = (
@@ -396,6 +447,7 @@ def render():
   document.getElementById("fatigue").disabled = false;
   // document.getElementById("show-derived-gap").disabled = false;
   document.getElementById("units").disabled = false;
+  document.getElementById("splits-mode").disabled = false;
 }
 
 function distConv() {
@@ -558,6 +610,11 @@ function bindEvents() {
       gapInput.value = formatMS(totalMin / (totalEffort * dc));
     }
     pyodide.globals.get("set_total_time")(totalMin);
+    scheduleRender();
+  });
+
+  document.getElementById("splits-mode").addEventListener("change", (e) => {
+    pyodide.globals.get("set_splits_mode")(e.target.value);
     scheduleRender();
   });
 
