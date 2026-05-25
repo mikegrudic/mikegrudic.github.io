@@ -66,10 +66,12 @@ Note that the grade-adjustment model (the same as used by Strava) is calibrated 
       <option value="metric">Metric (km, m)</option>
     </select>
   </div>
+  <!--
   <div class="control-row">
     <label for="show-derived-gap">Show pace ÷ gap_factor (sanity check):</label>
     <input type="checkbox" id="show-derived-gap" disabled>
   </div>
+  -->
 </div>
 
 <div id="status">Loading Python runtime (this takes a few seconds on first load)…</div>
@@ -135,8 +137,8 @@ def set_smoothing(s):
 def set_total_time(minutes):
     _state["total_time_minutes"] = float(minutes)
 
-def set_show_derived_gap(flag):
-    _state["show_derived_gap"] = bool(flag)
+# def set_show_derived_gap(flag):
+#     _state["show_derived_gap"] = bool(flag)
 
 def set_fatigue(rate_per_hour):
     _state["fatigue_rate_per_hour"] = float(rate_per_hour)
@@ -266,10 +268,10 @@ def render():
     ax_gap.set_ylabel(f"Relative effort per {dist_unit}")
 
     ax_pace.plot(distance, pace_min_per_unit_series, lw=0.8, color="black", label="actual")
-    if _state["show_derived_gap"]:
-        derived_gap_series = pace_min_per_unit_series / profile.gap_factor
-        ax_pace.plot(distance, derived_gap_series, lw=0.8, color="black", ls="--", label="pace ÷ gap_factor")
-        ax_pace.legend(loc="best", fontsize=8)
+    # if _state["show_derived_gap"]:
+    #     derived_gap_series = pace_min_per_unit_series / profile.gap_factor
+    #     ax_pace.plot(distance, derived_gap_series, lw=0.8, color="black", ls="--", label="pace ÷ gap_factor")
+    #     ax_pace.legend(loc="best", fontsize=8)
     ax_pace.set_yscale("log")
     ax_pace.invert_yaxis()
     ax_pace.set_ylabel(f"Pace (min:sec/{dist_unit})")
@@ -392,7 +394,7 @@ def render():
   document.getElementById("gap").disabled = false;
   document.getElementById("pace").disabled = false;
   document.getElementById("fatigue").disabled = false;
-  document.getElementById("show-derived-gap").disabled = false;
+  // document.getElementById("show-derived-gap").disabled = false;
   document.getElementById("units").disabled = false;
 }
 
@@ -500,10 +502,10 @@ function bindEvents() {
     scheduleRender();
   });
 
-  document.getElementById("show-derived-gap").addEventListener("change", (e) => {
-    pyodide.globals.get("set_show_derived_gap")(e.target.checked);
-    scheduleRender();
-  });
+  // document.getElementById("show-derived-gap").addEventListener("change", (e) => {
+  //   pyodide.globals.get("set_show_derived_gap")(e.target.checked);
+  //   scheduleRender();
+  // });
 
   document.getElementById("fatigue").addEventListener("change", (e) => {
     const pct = parseFloat(e.target.value);
