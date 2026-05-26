@@ -1,3 +1,4 @@
+import datetime
 from dataclasses import dataclass
 from functools import cache
 from xml.etree import ElementTree
@@ -142,7 +143,7 @@ def _parse_gpx_points(path):
     ns = {"gpx": ns_uri} if ns_uri else {}
     prefix = "gpx:" if ns else ""
 
-    lats, lons, eles = [], [], []
+    lats, lons, eles, times = [], [], [], []
     for pt in root.iterfind(f".//{prefix}trkpt", ns):
         ele_el = pt.find(f"{prefix}ele", ns)
         if ele_el is None or ele_el.text is None:
@@ -150,7 +151,16 @@ def _parse_gpx_points(path):
         lats.append(float(pt.attrib["lat"]))
         lons.append(float(pt.attrib["lon"]))
         eles.append(float(ele_el.text))
-    return np.array(lats), np.array(lons), np.array(eles)
+        time_el = pt.find(f"{prefix}time", ns)
+        if time_el is not None and time_el.text is not None:
+            try:
+                t = datetime.datetime.fromisoformat(time_el.text.replace("Z", "+00:00"))
+                times.append(t.timestamp())
+            except ValueError:
+                times.append(np.nan)
+        else:
+            times.append(np.nan)
+    return np.array(lats), np.array(lons), np.array(eles), np.array(times)
 
 
 @dataclass
@@ -179,6 +189,7 @@ class ElevationProfile:
     gap_factor: np.ndarray
     latitude: np.ndarray
     longitude: np.ndarray
+    time_seconds: np.ndarray
 
     @classmethod
     def from_gpx(cls, path, smoothing_length=50.0, model="strava"):
@@ -205,18 +216,23 @@ class ElevationProfile:
             tabulated Strava GAP curve; ``"minetti"`` uses the Minetti
             et al. (2002) polynomial fit.
         """
-        lat, lon, elevation = _parse_gpx_points(path)
+        lat, lon, elevation, time_abs = _parse_gpx_points(path)
         if len(lat) < 2:
             raise ValueError(f"GPX file {path} contains fewer than 2 track points with elevation")
 
         segment_lengths = _haversine(lat[:-1], lon[:-1], lat[1:], lon[1:])
         keep = np.concatenate(([True], segment_lengths > 0))
-        lat, lon, elevation = lat[keep], lon[keep], elevation[keep]
+        lat, lon, elevation, time_abs = lat[keep], lon[keep], elevation[keep], time_abs[keep]
         segment_lengths = _haversine(lat[:-1], lon[:-1], lat[1:], lon[1:])
         distance = np.concatenate(([0.0], np.cumsum(segment_lengths)))
 
         if smoothing_length > 0:
             elevation = _iir_smooth(elevation, segment_lengths, smoothing_length)
+
+        if np.any(np.isfinite(time_abs)):
+            time_seconds = time_abs - np.nanmin(time_abs)
+        else:
+            time_seconds = time_abs
 
         grade = np.gradient(elevation, distance) * 100.0
         gap_factor = _gap_factor(grade, model=model)
@@ -227,6 +243,7 @@ class ElevationProfile:
             gap_factor=gap_factor,
             latitude=lat,
             longitude=lon,
+            time_seconds=time_seconds,
         )
     
     def constant_gap_split_time(self, total_time_minutes, fatigue_rate_per_hour=0.0):
