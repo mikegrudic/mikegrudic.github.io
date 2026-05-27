@@ -561,7 +561,7 @@ function ingestGpxBytes(arrayBuf, overrides = {}) {
     defaultMin = overrides.totalMinutes;
   } else {
     const gpxMin = pyodide.globals.get("gpx_total_time_minutes")();
-    defaultMin = gpxMin !== null ? gpxMin : pyodide.globals.get("default_initial_time_minutes")();
+    defaultMin = gpxMin ?? pyodide.globals.get("default_initial_time_minutes")();
   }
   if (defaultMin !== null) {
     document.getElementById("time").value = formatHMS(defaultMin);
