@@ -347,30 +347,57 @@ def render():
     ax_gap.axhline(1, color="k", lw=0.3)
     ax_gap.set_ylabel(f"Relative effort per {dist_unit}")
 
-    ax_pace.plot(distance, pace_min_per_unit_series, lw=0.8, color="black", label="model")
+    # Build resampled (1-min) GPX series shared across the pace / ET / vspeed
+    # overlays if time data is present and the toggle is on.
+    gpx_overlay = None  # dict or None
     if _state["show_gpx_pace"] and np.any(np.isfinite(profile.time_seconds)):
         valid = np.isfinite(profile.time_seconds)
         t_valid = profile.time_seconds[valid]
         d_valid = distance[valid]
+        z_valid = elevation[valid]
         if t_valid[-1] > t_valid[0]:
             t_grid = np.arange(t_valid[0], t_valid[-1], 60.0)
             d_grid = np.interp(t_grid, t_valid, d_valid)
-            gpx_pace = np.gradient(t_grid / 60.0, d_grid)
-            ax_pace.plot(d_grid, gpx_pace, lw=0.8, color="red", alpha=0.5, label="from GPX")
-            ax_pace.legend(loc="best", fontsize=8)
+            z_grid = np.interp(t_grid, t_valid, z_valid)
+            gpx_overlay = {
+                "t_h_raw": t_valid / 3600.0,
+                "d_raw": d_valid,
+                "pace": np.gradient(t_grid / 60.0, d_grid),
+                "vspeed": np.gradient(z_grid, t_grid / 3600.0),
+                "d_grid": d_grid,
+            }
+
+    ax_pace.plot(distance, pace_min_per_unit_series, lw=0.8, color="black", label="model")
+    if gpx_overlay is not None:
+        ax_pace.plot(gpx_overlay["d_grid"], gpx_overlay["pace"], lw=0.8, color="red", alpha=0.5, label="from GPX")
+        ax_pace.legend(loc="best", fontsize=8)
     ax_pace.set_yscale("log")
     ax_pace.invert_yaxis()
     ax_pace.set_ylabel(f"Pace (min:sec/{dist_unit})")
     ax_pace.yaxis.set_major_locator(FixedLocator(pace_ticks))
     ax_pace.yaxis.set_minor_locator(NullLocator())
     ax_pace.yaxis.set_major_formatter(FuncFormatter(_pace_tick))
+    # Cap slow end of pace plot at 1 h / unit so noisy GPX/model spikes don't
+    # blow up the log range.
+    pace_bottom = ax_pace.get_ylim()[0]
+    ax_pace.set_ylim(bottom=min(60.0, pace_bottom))
 
-    ax_split.plot(distance, split_hours, lw=1, color="black")
+    ax_split.plot(distance, split_hours, lw=1, color="black", label="model")
+    if gpx_overlay is not None:
+        ax_split.plot(gpx_overlay["d_raw"], gpx_overlay["t_h_raw"], lw=0.8, color="red", alpha=0.5, label="from GPX")
+        ax_split.legend(loc="best", fontsize=8)
     ax_split.set_ylabel("Elapsed time (h)")
 
-    ax_vspeed.plot(distance, vspeed_per_h, lw=0.7, color="black")
+    ax_vspeed.plot(distance, vspeed_per_h, lw=0.7, color="black", label="model")
+    if gpx_overlay is not None:
+        ax_vspeed.plot(gpx_overlay["d_grid"], gpx_overlay["vspeed"], lw=0.7, color="red", alpha=0.5, label="from GPX")
+        ax_vspeed.legend(loc="best", fontsize=8)
     ax_vspeed.axhline(0, color="k", lw=0.3)
     ax_vspeed.set_ylabel(f"Vertical speed ({vert_unit}/h)")
+    # Cap visible range to +/- 10 000 ft/h (or metric equivalent ~3000 m/h).
+    vspeed_cap = 3048.0 if metric else 10000.0
+    vs_bot, vs_top = ax_vspeed.get_ylim()
+    ax_vspeed.set_ylim(max(vs_bot, -vspeed_cap), min(vs_top, vspeed_cap))
 
     for ax in (ax_elev, ax_grade, ax_gap, ax_pace, ax_split, ax_vspeed):
         ax.xaxis.set_major_locator(MaxNLocator(nbins=20, steps=[1, 2, 5, 10]))
