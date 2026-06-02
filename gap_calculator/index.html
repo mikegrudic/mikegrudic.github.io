@@ -364,7 +364,11 @@ def render():
             mask = (ref_distance > a) & (ref_distance < b)
             d_seg = np.concatenate(([a], ref_distance[mask], [b]))
             s_seg = np.concatenate(([np.interp(a, ref_distance, series)], series[mask], [np.interp(b, ref_distance, series)]))
-            avgs[i] = np.trapezoid(s_seg, d_seg) / (b - a) if b > a else np.nan
+            if b > a:
+                trap = 0.5 * float(np.sum((s_seg[1:] + s_seg[:-1]) * np.diff(d_seg)))
+                avgs[i] = trap / (b - a)
+            else:
+                avgs[i] = np.nan
         return avgs
 
     def _bin_avg_rate(numerator, denominator, ref_distance, edges):
