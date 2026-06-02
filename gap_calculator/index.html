@@ -328,7 +328,7 @@ def render():
     pace_min_per_unit_series = np.gradient(split_minutes, distance)
     vspeed_per_h = np.gradient(elevation, split_hours)
 
-    fig, axes = plt.subplots(3, 2, figsize=(14, 10), sharex="all")
+    fig, axes = plt.subplots(3, 2, figsize=(12, 16), sharex="all")
     ax_elev = axes[0, 0]
     ax_grade = axes[0, 1]
     ax_gap = axes[1, 0]
@@ -405,6 +405,7 @@ def render():
         ax.set_xlabel(f"Distance ({dist_unit})")
         ax.tick_params(labelbottom=True)
         ax.grid(alpha=0.3)
+        ax.set_box_aspect(1.0)
 
     fig.tight_layout()
 
