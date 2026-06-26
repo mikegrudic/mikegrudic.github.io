@@ -167,6 +167,9 @@ M_PER_FT = 0.3048
 def set_bytes(b):
     _state["bytes"] = bytes(b)
 
+def clear_bytes():
+    _state["bytes"] = None
+
 def set_smoothing(s):
     _state["smoothing"] = float(s)
 
@@ -748,32 +751,43 @@ function setStatus(msg) {
 }
 
 function ingestGpxBytes(arrayBuf, overrides = {}) {
-  pyodide.globals.get("set_bytes")(new Uint8Array(arrayBuf));
-  if (overrides.splitsMode) {
-    pyodide.globals.get("set_splits_mode")(overrides.splitsMode);
-    document.getElementById("splits-mode").value = overrides.splitsMode;
-  }
-  let defaultMin;
-  if (overrides.totalMinutes !== undefined) {
-    defaultMin = overrides.totalMinutes;
-  } else {
-    const gpxMin = pyodide.globals.get("gpx_total_time_minutes")();
-    defaultMin = gpxMin ?? pyodide.globals.get("default_initial_time_minutes")();
-  }
-  if (defaultMin !== null) {
-    document.getElementById("time").value = formatHMS(defaultMin);
-    const dc = distConv();
-    const totalEffort = pyodide.globals.get("total_effort_mi_current")();
-    if (totalEffort !== null && totalEffort > 0) {
-      document.getElementById("gap").value = formatMS(defaultMin / (totalEffort * dc));
+  try {
+    pyodide.globals.get("set_bytes")(new Uint8Array(arrayBuf));
+    if (overrides.splitsMode) {
+      pyodide.globals.get("set_splits_mode")(overrides.splitsMode);
+      document.getElementById("splits-mode").value = overrides.splitsMode;
     }
-    const totalDist = pyodide.globals.get("total_distance_mi_current")();
-    if (totalDist !== null && totalDist > 0) {
-      document.getElementById("pace").value = formatMS(defaultMin / (totalDist * dc));
+    let defaultMin;
+    if (overrides.totalMinutes !== undefined) {
+      defaultMin = overrides.totalMinutes;
+    } else {
+      const gpxMin = pyodide.globals.get("gpx_total_time_minutes")();
+      defaultMin = gpxMin ?? pyodide.globals.get("default_initial_time_minutes")();
     }
-    pyodide.globals.get("set_total_time")(defaultMin);
+    if (defaultMin !== null) {
+      document.getElementById("time").value = formatHMS(defaultMin);
+      const dc = distConv();
+      const totalEffort = pyodide.globals.get("total_effort_mi_current")();
+      if (totalEffort !== null && totalEffort > 0) {
+        document.getElementById("gap").value = formatMS(defaultMin / (totalEffort * dc));
+      }
+      const totalDist = pyodide.globals.get("total_distance_mi_current")();
+      if (totalDist !== null && totalDist > 0) {
+        document.getElementById("pace").value = formatMS(defaultMin / (totalDist * dc));
+      }
+      pyodide.globals.get("set_total_time")(defaultMin);
+    }
+    scheduleRender();
+  } catch (e) {
+    pyodide.globals.get("clear_bytes")();
+    const msg = e.message || String(e);
+    if (msg.includes("fewer than 2 track points with elevation")) {
+      setStatus("Error: GPX file has no elevation data. Export your route with elevation included (e.g. from Caltopo: Actions → Export → GPX with elevation).");
+    } else {
+      setStatus("Error loading GPX: " + msg);
+    }
+    console.error(e);
   }
-  scheduleRender();
 }
 
 function bindEvents() {
