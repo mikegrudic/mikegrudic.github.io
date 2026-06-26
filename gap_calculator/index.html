@@ -79,6 +79,10 @@ Note that the grade-adjustment model (the same as used by Strava) is calibrated 
     </select>
   </div>
   <div class="control-row">
+    <label for="gap-bias">Uphill/downhill effort bias (Δeffort per % grade): <span id="gap-bias-val">0.000</span></label>
+    <input type="range" id="gap-bias" min="-0.05" max="0.05" value="0" step="0.001" disabled>
+  </div>
+  <div class="control-row">
     <label for="show-gpx-pace">Overplot pace from GPX (if available):</label>
     <input type="checkbox" id="show-gpx-pace" disabled>
   </div>
@@ -153,7 +157,7 @@ def _pace_tick(min_per_mi, _pos):
         return ""
     return _format_clock(min_per_mi * 60)
 
-_state = {"bytes": None, "smoothing": 30.0, "total_time_minutes": 120.0, "fatigue_rate_per_hour": 0.0, "split_pct": 0.0, "show_derived_gap": False, "units": "imperial", "splits_mode": "distance", "gap_model": "strava", "show_gpx_pace": False, "reverse": False, "step_averages": False}
+_state = {"bytes": None, "smoothing": 30.0, "total_time_minutes": 120.0, "fatigue_rate_per_hour": 0.0, "split_pct": 0.0, "show_derived_gap": False, "units": "imperial", "splits_mode": "distance", "gap_model": "strava", "show_gpx_pace": False, "reverse": False, "step_averages": False, "gap_bias_slope": 0.0}
 
 M_TO_MI = 0.0006213711922
 M_TO_FT = 3.280839895
@@ -199,6 +203,16 @@ def set_reverse(flag):
 def set_step_averages(flag):
     _state["step_averages"] = bool(flag)
 
+def set_gap_bias(slope):
+    _state["gap_bias_slope"] = float(slope)
+
+def _apply_gap_bias(profile):
+    slope = _state["gap_bias_slope"]
+    if slope == 0.0:
+        return profile
+    profile.gap_factor = np.maximum(0.01, profile.gap_factor + slope * profile.grade)
+    return profile
+
 def _total_effort_mi(profile, distance_mi):
     avg_factor = 0.5 * (profile.gap_factor[:-1] + profile.gap_factor[1:])
     return float(np.sum(avg_factor * np.diff(distance_mi)))
@@ -235,12 +249,12 @@ def default_initial_time_minutes():
     GAP-adjusted distance. Returns None if no GPX is loaded."""
     if _state["bytes"] is None:
         return None
-    profile = ElevationProfile.from_gpx(
+    profile = _apply_gap_bias(ElevationProfile.from_gpx(
         io.BytesIO(_state["bytes"]),
         smoothing_length=_state["smoothing"],
         model=_state["gap_model"],
         reverse=_state["reverse"],
-    )
+    ))
     distance_mi = profile.distance * M_TO_MI
     effort = _total_effort_mi(profile, distance_mi)
     wr_pace = _world_record_pace_min_per_mi(effort)
@@ -251,12 +265,12 @@ def total_effort_mi_current():
     smoothing setting. Returns None if no GPX has been loaded."""
     if _state["bytes"] is None:
         return None
-    profile = ElevationProfile.from_gpx(
+    profile = _apply_gap_bias(ElevationProfile.from_gpx(
         io.BytesIO(_state["bytes"]),
         smoothing_length=_state["smoothing"],
         model=_state["gap_model"],
         reverse=_state["reverse"],
-    )
+    ))
     distance_mi = profile.distance * M_TO_MI
     return _total_effort_mi(profile, distance_mi)
 
@@ -289,12 +303,12 @@ def gpx_total_time_minutes():
 def render():
     if _state["bytes"] is None:
         return ""
-    profile = ElevationProfile.from_gpx(
+    profile = _apply_gap_bias(ElevationProfile.from_gpx(
         io.BytesIO(_state["bytes"]),
         smoothing_length=_state["smoothing"],
         model=_state["gap_model"],
         reverse=_state["reverse"],
-    )
+    ))
 
     metric = _state["units"] == "metric"
     if metric:
@@ -679,6 +693,7 @@ def render():
   document.getElementById("units").disabled = false;
   document.getElementById("splits-mode").disabled = false;
   document.getElementById("gap-model").disabled = false;
+  document.getElementById("gap-bias").disabled = false;
   document.getElementById("show-gpx-pace").disabled = false;
   document.getElementById("reverse").disabled = false;
   document.getElementById("step-averages").disabled = false;
@@ -901,6 +916,24 @@ function bindEvents() {
 
   document.getElementById("gap-model").addEventListener("change", (e) => {
     pyodide.globals.get("set_gap_model")(e.target.value);
+    const totalMin = parseHMS(timeInput.value);
+    if (totalMin !== null) {
+      const dc = distConv();
+      const totalEffort = pyodide.globals.get("total_effort_mi_current")();
+      if (totalEffort !== null && totalEffort > 0) {
+        gapInput.value = formatMS(totalMin / (totalEffort * dc));
+      }
+    }
+    scheduleRender();
+  });
+
+  const biasSlider = document.getElementById("gap-bias");
+  const biasVal = document.getElementById("gap-bias-val");
+  biasSlider.addEventListener("input", () => {
+    biasVal.textContent = parseFloat(biasSlider.value).toFixed(3);
+  });
+  biasSlider.addEventListener("change", () => {
+    pyodide.globals.get("set_gap_bias")(parseFloat(biasSlider.value));
     const totalMin = parseHMS(timeInput.value);
     if (totalMin !== null) {
       const dc = distConv();
