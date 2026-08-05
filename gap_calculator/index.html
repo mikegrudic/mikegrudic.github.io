@@ -373,13 +373,15 @@ def render():
     pace_min_per_unit_series = np.gradient(split_minutes, distance)
     vspeed_per_h = np.gradient(elevation, split_hours)
 
-    fig, axes = plt.subplots(3, 2, figsize=(12, 16), sharex="all")
+    fig, axes = plt.subplots(4, 2, figsize=(12, 21), sharex="all")
     ax_elev = axes[0, 0]
     ax_grade = axes[0, 1]
     ax_gap = axes[1, 0]
     ax_pace = axes[1, 1]
     ax_split = axes[2, 0]
     ax_vspeed = axes[2, 1]
+    ax_gappace = axes[3, 0]
+    axes[3, 1].set_visible(False)
 
     ax_elev.plot(distance, elevation, lw=1, color=_FG)
     ax_elev.set_ylabel(f"Elevation ({vert_unit})")
@@ -518,7 +520,35 @@ def render():
     vs_bot, vs_top = ax_vspeed.get_ylim()
     ax_vspeed.set_ylim(max(vs_bot, -vspeed_cap), min(vs_top, vspeed_cap))
 
-    for ax in (ax_elev, ax_grade, ax_gap, ax_pace, ax_split, ax_vspeed):
+    # Grade-adjusted pace (GAP): local pace / grade factor. Flat for the
+    # constant-GAP model unless a fatigue / split strategy warps it with
+    # elapsed time; for GPX pace data it reveals how evenly the effort was
+    # actually paced (surges show as faster GAP, fades as slower).
+    gap_pace_series = pace_min_per_unit_series / profile.gap_factor
+    if step_mode:
+        model_gap_bin = _bin_avg_dist_weighted(gap_pace_series, distance, bin_edges)
+        ax_gappace.stairs(model_gap_bin, bin_edges, color=_FG, lw=0.9, label="model")
+    else:
+        ax_gappace.plot(distance, gap_pace_series, lw=0.8, color=_FG, label="model")
+    if gpx_overlay is not None:
+        gpx_gap_factor = np.interp(gpx_overlay["d_grid"], distance, profile.gap_factor)
+        gpx_gap_pace = gpx_overlay["pace"] / gpx_gap_factor
+        if step_mode:
+            gpx_gap_bin = _bin_avg_dist_weighted(gpx_gap_pace, gpx_overlay["d_grid"], bin_edges)
+            ax_gappace.stairs(gpx_gap_bin, bin_edges, color="#ff6b6b", alpha=0.7, lw=0.9, label="from GPX")
+        else:
+            ax_gappace.plot(gpx_overlay["d_grid"], gpx_gap_pace, lw=0.8, color="#ff6b6b", alpha=0.7, label="from GPX")
+        ax_gappace.legend(loc="best", fontsize=8)
+    ax_gappace.set_yscale("log")
+    ax_gappace.invert_yaxis()
+    ax_gappace.set_ylabel(f"GAP (min:sec/{dist_unit})")
+    ax_gappace.yaxis.set_major_locator(FixedLocator(pace_ticks))
+    ax_gappace.yaxis.set_minor_locator(NullLocator())
+    ax_gappace.yaxis.set_major_formatter(FuncFormatter(_pace_tick))
+    gap_pace_bottom = ax_gappace.get_ylim()[0]
+    ax_gappace.set_ylim(bottom=min(60.0, gap_pace_bottom))
+
+    for ax in (ax_elev, ax_grade, ax_gap, ax_pace, ax_split, ax_vspeed, ax_gappace):
         ax.xaxis.set_major_locator(MaxNLocator(nbins=20, steps=[1, 2, 5, 10]))
         ax.set_xlim(0, distance[-1])
         ax.set_xlabel(f"Distance ({dist_unit})")
