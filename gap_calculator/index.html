@@ -439,16 +439,33 @@ def render():
         d_valid = distance[valid]
         z_valid = elevation[valid]
         if t_valid[-1] > t_valid[0]:
-            t_grid = np.arange(t_valid[0], t_valid[-1], 60.0)
-            d_grid = np.interp(t_grid, t_valid, d_valid)
-            z_grid = np.interp(t_grid, t_valid, z_valid)
+            # Sample pace / vertical speed on a dense time grid (fine enough to
+            # look continuous), but derive each value from a centered finite
+            # difference over a fixed time window so 1 Hz GPS jitter doesn't
+            # swamp the signal. Density and smoothing are thus decoupled; the
+            # old fixed 60 s resample gave only ~1 point per minute.
+            GRID_DT = 5.0        # grid spacing (s)
+            HALF_WINDOW = 30.0   # centered-difference half-window (s)
+            t_grid = np.arange(t_valid[0], t_valid[-1] + GRID_DT, GRID_DT)
+            t_lo = np.clip(t_grid - HALF_WINDOW, t_valid[0], t_valid[-1])
+            t_hi = np.clip(t_grid + HALF_WINDOW, t_valid[0], t_valid[-1])
+            d_lo = np.interp(t_lo, t_valid, d_valid)
+            d_hi = np.interp(t_hi, t_valid, d_valid)
+            z_lo = np.interp(t_lo, t_valid, z_valid)
+            z_hi = np.interp(t_hi, t_valid, z_valid)
+            dd = d_hi - d_lo
+            dt_min = (t_hi - t_lo) / 60.0
+            dt_h = (t_hi - t_lo) / 3600.0
+            with np.errstate(divide="ignore", invalid="ignore"):
+                pace = np.where(dd > 0, dt_min / dd, np.nan)
+                vspeed = np.where(dt_h > 0, (z_hi - z_lo) / dt_h, np.nan)
             gpx_overlay = {
                 "t_h_raw": t_valid / 3600.0,
                 "d_raw": d_valid,
                 "z_raw": z_valid,
-                "pace": np.gradient(t_grid / 60.0, d_grid),
-                "vspeed": np.gradient(z_grid, t_grid / 3600.0),
-                "d_grid": d_grid,
+                "pace": pace,
+                "vspeed": vspeed,
+                "d_grid": np.interp(t_grid, t_valid, d_valid),
             }
 
     if step_mode:
