@@ -11,6 +11,11 @@ the tokens yourself.
       Firefox uses Storage -> Cookies -> https://www.strava.com, Chrome uses
       Application -> Cookies. The row is named _strava4_session.
 
+  python strava_lookup.py --auto --session <_strava4_session>
+      Find every new non-virtual activity above MIN_GAIN_FT in the training
+      log, mint its embed token, and add it. This is the usual way to
+      refresh the page.
+
   python strava_lookup.py --paste snippets.txt      (or: ... --paste - )
       Read embed snippets copied from each activity's Share -> Embed
       dialog and insert them. Accepts the placeholder-div or iframe form,
@@ -93,6 +98,44 @@ def parse_snippets(text):
     for aid in re.findall(r'data-embed-id="(\d+)"', text):
         pairs.setdefault(aid, None)
     return sorted(pairs.items(), reverse=True)
+
+
+def list_recent(session, newest, max_pages=10):
+    """Return qualifying activities newer than `newest`, via the training log.
+
+    The public API is subscriber-only now, so this reads the same JSON the
+    logged-in training log page uses. Ids increase over time, so paging can
+    stop once a page reaches back past what is already embedded.
+    """
+    found, page = [], 1
+    while page <= max_pages:
+        r = session.get("https://www.strava.com/athlete/training_activities",
+                        params={"keywords": "", "activity_type": "", "workout_type": "",
+                                "commute": "", "new_activity_only": "false",
+                                "page": page, "per_page": 20},
+                        headers={"X-Requested-With": "XMLHttpRequest",
+                                 "Referer": "https://www.strava.com/athlete/training"},
+                        timeout=45)
+        try:
+            models = r.json().get("models", [])
+        except ValueError:
+            sys.exit("Could not read the training log -- cookie expired?")
+        if not models:
+            break
+        for a in models:
+            if a["id"] <= newest:
+                continue
+            gain_ft = a.get("elevation_gain_raw", 0) * 3.28084
+            if gain_ft > MIN_GAIN_FT and not a["sport_type"].startswith("Virtual"):
+                found.append(a)
+                print(f"  {a['id']}  {a['start_date']:16} {gain_ft:6.0f}ft  {a['name'][:40]}")
+        if min(a["id"] for a in models) <= newest:
+            break
+        page += 1
+        time.sleep(0.4)
+    else:
+        print(f"  (stopped at {max_pages} pages; rerun if more are missing)")
+    return found
 
 
 def csrf_token(aid, session):
@@ -192,6 +235,12 @@ def main():
     have = existing_ids(html)
     print(f"{len(have)} activities already embedded")
 
+    session = None
+    if cookie:
+        session = requests.Session()
+        session.headers.update({"User-Agent": UA})
+        session.cookies.set("_strava4_session", cookie, domain=".strava.com")
+
     if argv and argv[0] == "--paste":
         blob = sys.stdin.read() if argv[1:] in ([], ["-"]) else open(argv[1]).read()
         entries = [(aid, tok) for aid, tok in parse_snippets(blob)
@@ -211,6 +260,13 @@ def main():
                 entries.append((aid, m.group(2)))
         if not entries:
             sys.exit("Nothing to add (all IDs already present).")
+    elif argv and argv[0] == "--auto":
+        if not cookie:
+            sys.exit("--auto needs --session <_strava4_session>.")
+        entries = [(a["id"], None) for a in list_recent(session, max(have))]
+        if not entries:
+            print("No new activities match criteria")
+            return
     else:
         activities = fetch_activities(get_token())
         print(f"Fetched {len(activities)} activities")
@@ -223,9 +279,6 @@ def main():
             return
 
     if cookie:
-        session = requests.Session()
-        session.headers.update({"User-Agent": UA})
-        session.cookies.set("_strava4_session", cookie, domain=".strava.com")
         csrf = csrf_token(entries[0][0], session)
         resolved = []
         for i, (aid, tok) in enumerate(entries, 1):
