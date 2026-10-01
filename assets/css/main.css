@@ -2128,6 +2128,7 @@ input, select, textarea {
 				border-radius: 100%;
 				height: 100%;
 				object-fit: cover;
+				object-position: 50% 75%; /* tuned to me6.jpg: face sits at the circle's widest point */
 			}
 
 		#top h1 {
