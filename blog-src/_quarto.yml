@@ -1,0 +1,27 @@
+project:
+  type: website
+
+website:
+  title: "Mike Grudić"
+  site-url: https://mikegrudic.github.io/blog
+  description: "Astrophysics, computing, and mountains."
+  open-graph: true
+  twitter-card: true
+  navbar:
+    left:
+      - href: https://mikegrudic.github.io
+        text: Home
+      - href: index.qmd
+        text: Blog
+    right:
+      - icon: rss
+        href: index.xml
+
+execute:
+  # only re-run a post's code when its source changes
+  freeze: auto
+
+format:
+  html:
+    theme: [cosmo, styles.scss]
+    toc: true

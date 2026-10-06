@@ -1,0 +1,43 @@
+---
+title: "Test post"
+description: "Kitchen-sink check of math, figures, citations, and embeds."
+date: 2026-10-06
+categories: [meta]
+bibliography: references.bib
+---
+
+The stellar initial mass function of @Kroupa2001 is a broken power law:
+
+$$
+\frac{dN}{dM_\star} \propto M_\star^{-\alpha}, \qquad
+\alpha = \begin{cases}
+0.3 & M_\star < 0.08\,M_\odot \\
+1.3 & 0.08\,M_\odot \le M_\star < 0.5\,M_\odot \\
+2.3 & M_\star \ge 0.5\,M_\odot
+\end{cases}
+$$ {#eq-kroupa}
+
+@fig-imf plots @eq-kroupa per logarithmic mass interval.
+
+```{python}
+#| label: fig-imf
+#| fig-cap: "The Kroupa IMF."
+#| code-fold: true
+import numpy as np
+import matplotlib.pyplot as plt
+
+m = np.logspace(-2, 2, 400)
+dNdm = np.where(m < 0.08, (m / 0.08) ** -0.3,
+       np.where(m < 0.5, (m / 0.08) ** -1.3,
+                (0.5 / 0.08) ** -1.3 * (m / 0.5) ** -2.3))
+dNdlogm = m * dNdm
+
+fig, ax = plt.subplots(figsize=(5, 3.5))
+ax.loglog(m, dNdlogm / dNdlogm.max(), color="k")
+ax.set(xlabel=r"$M_\star\,(M_\odot)$", ylabel=r"$dN/d\log M_\star$ (normalized)")
+plt.show()
+```
+
+STARFORGE simulations [@Grudic2021] form stars out of a giant molecular cloud and get an IMF of roughly this shape:
+
+{{< video https://www.youtube.com/embed/Aehqb-vDV_w >}}
