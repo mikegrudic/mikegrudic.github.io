@@ -23,5 +23,8 @@ execute:
 
 format:
   html:
-    theme: [cosmo, styles.scss]
+    # listed first = default; both listed = navbar toggle
+    theme:
+      dark: [darkly, styles.scss]
+      light: [cosmo, styles.scss]
     toc: true
