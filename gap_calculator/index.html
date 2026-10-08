@@ -85,6 +85,10 @@ Note that the grade-adjustment model (the same as used by Strava) is calibrated 
     <input type="range" id="gap-bias" min="-0.05" max="0.05" value="0" step="0.001" disabled>
   </div>
   <div class="control-row">
+    <label for="technical">Technical sections (one per line: <code>start-end %</code> extra effort, e.g. <code>3.2-4.5 20</code>):</label>
+    <textarea id="technical" rows="3" cols="20" placeholder="3.2-4.5 20" disabled></textarea>
+  </div>
+  <div class="control-row">
     <label for="show-gpx-pace">Overplot pace from GPX (if available):</label>
     <input type="checkbox" id="show-gpx-pace" disabled>
   </div>
@@ -137,6 +141,7 @@ async function init() {
   pyodide.runPython(`
 import base64
 import io
+import re
 import matplotlib
 matplotlib.use("Agg")
 import numpy as np
@@ -178,7 +183,7 @@ def _pace_tick(min_per_mi, _pos):
         return ""
     return _format_clock(min_per_mi * 60)
 
-_state = {"bytes": None, "smoothing": 30.0, "total_time_minutes": 120.0, "fatigue_rate_per_hour": 0.0, "split_pct": 0.0, "show_derived_gap": False, "units": "imperial", "splits_mode": "distance", "gap_model": "strava", "show_gpx_pace": False, "reverse": False, "step_averages": False, "gap_bias_slope": 0.0}
+_state = {"bytes": None, "smoothing": 30.0, "total_time_minutes": 120.0, "fatigue_rate_per_hour": 0.0, "split_pct": 0.0, "show_derived_gap": False, "units": "imperial", "splits_mode": "distance", "gap_model": "strava", "show_gpx_pace": False, "reverse": False, "step_averages": False, "gap_bias_slope": 0.0, "technical_sections": []}
 
 M_TO_MI = 0.0006213711922
 M_TO_FT = 3.280839895
@@ -222,7 +227,15 @@ def set_show_gpx_pace(flag):
     _state["show_gpx_pace"] = bool(flag)
 
 def set_reverse(flag):
-    _state["reverse"] = bool(flag)
+    flag = bool(flag)
+    # Technical sections describe terrain, so mirror them with the route.
+    if flag != _state["reverse"] and _state["bytes"] is not None:
+        length_m = total_distance_mi_current() / M_TO_MI
+        _state["technical_sections"] = [
+            (length_m - end, length_m - start, frac)
+            for start, end, frac in _state["technical_sections"]
+        ]
+    _state["reverse"] = flag
 
 def set_step_averages(flag):
     _state["step_averages"] = bool(flag)
@@ -230,11 +243,43 @@ def set_step_averages(flag):
 def set_gap_bias(slope):
     _state["gap_bias_slope"] = float(slope)
 
+def _unit_m():
+    return 1000.0 if _state["units"] == "metric" else 1.0 / M_TO_MI
+
+def set_technical_sections(text):
+    """Parse 'start-end pct' lines, in current distance units, into
+    (start_m, end_m, fraction) ranges along the route as displayed."""
+    sections = []
+    for n, line in enumerate(text.splitlines(), 1):
+        line = line.strip()
+        if not line:
+            continue
+        # Backslashes doubled: this Python lives inside a JS template literal.
+        m = re.fullmatch(r"(\\d*\\.?\\d+)\\s*-\\s*(\\d*\\.?\\d+)\\s*[:,]?\\s*([+-]?\\d*\\.?\\d+)\\s*%?", line)
+        if not m:
+            raise ValueError(f"line {n}: expected 'start-end percent', got {line!r}")
+        start, end, pct = (float(g) for g in m.groups())
+        if end <= start:
+            raise ValueError(f"line {n}: end must be after start")
+        if pct <= -100:
+            raise ValueError(f"line {n}: percent must be above -100")
+        sections.append((start * _unit_m(), end * _unit_m(), pct / 100.0))
+    _state["technical_sections"] = sections
+
+def technical_sections_text():
+    return "\\n".join(
+        f"{start / _unit_m():.2f}-{end / _unit_m():.2f} {frac * 100:g}"
+        for start, end, frac in _state["technical_sections"]
+    )
+
 def _apply_gap_bias(profile):
+    """Apply the uphill/downhill bias, then technical-section multipliers."""
     slope = _state["gap_bias_slope"]
-    if slope == 0.0:
-        return profile
-    profile.gap_factor = np.maximum(0.01, profile.gap_factor + slope * profile.grade)
+    if slope != 0.0:
+        profile.gap_factor = np.maximum(0.01, profile.gap_factor + slope * profile.grade)
+    for start, end, frac in _state["technical_sections"]:
+        inside = (profile.distance >= start) & (profile.distance <= end)
+        profile.gap_factor = np.where(inside, profile.gap_factor * (1.0 + frac), profile.gap_factor)
     return profile
 
 def _total_effort_mi(profile, distance_mi):
@@ -324,6 +369,18 @@ def gpx_total_time_minutes():
         return None
     return float(np.nanmax(profile.time_seconds) / 60.0)
 
+def _effective_fatigue():
+    """Per-hour fatigue rate. A Positive/Negative split %, if set, overrides
+    the fatigue input: R = 1 + split%/100 maps to f = R^(1/T_hours) - 1 so the
+    final GAP pace equals R x the initial GAP pace."""
+    if _state["split_pct"] == 0.0:
+        return _state["fatigue_rate_per_hour"]
+    R = 1.0 + _state["split_pct"] / 100.0
+    T_hours = _state["total_time_minutes"] / 60.0
+    if R > 0 and T_hours > 0:
+        return R ** (1.0 / T_hours) - 1.0
+    return 0.0
+
 def render():
     if _state["bytes"] is None:
         return ""
@@ -352,18 +409,7 @@ def render():
 
     distance_mi = profile.distance * M_TO_MI  # for effort computation only
     gain_disp = float(np.sum(np.maximum(0.0, np.diff(elevation))))
-    # Positive/Negative split %, if set, overrides the per-hour fatigue rate.
-    # Maps R = 1 + split%/100 to an exponential rate f = R^(1/T_hours) - 1 so
-    # the final GAP pace equals R x the initial GAP pace.
-    if _state["split_pct"] != 0.0:
-        R = 1.0 + _state["split_pct"] / 100.0
-        T_hours = _state["total_time_minutes"] / 60.0
-        if R > 0 and T_hours > 0:
-            effective_fatigue = R ** (1.0 / T_hours) - 1.0
-        else:
-            effective_fatigue = 0.0
-    else:
-        effective_fatigue = _state["fatigue_rate_per_hour"]
+    effective_fatigue = _effective_fatigue()
 
     split_minutes = profile.constant_gap_split_time(
         _state["total_time_minutes"],
@@ -566,6 +612,8 @@ def render():
         ax.tick_params(labelbottom=True)
         ax.grid(alpha=0.3)
         ax.set_box_aspect(1.0)
+        for start, end, _ in _state["technical_sections"]:
+            ax.axvspan(start / _unit_m(), end / _unit_m(), color="#ffb347", alpha=0.15, lw=0)
 
     fig.tight_layout()
 
@@ -776,6 +824,7 @@ def render():
   document.getElementById("splits-mode").disabled = false;
   document.getElementById("gap-model").disabled = false;
   document.getElementById("gap-bias").disabled = false;
+  document.getElementById("technical").disabled = false;
   document.getElementById("show-gpx-pace").disabled = false;
   document.getElementById("reverse").disabled = false;
   document.getElementById("step-averages").disabled = false;
@@ -994,8 +1043,29 @@ function bindEvents() {
     scheduleRender();
   });
 
+  const techInput = document.getElementById("technical");
+  techInput.addEventListener("change", () => {
+    try {
+      pyodide.globals.get("set_technical_sections")(techInput.value);
+    } catch (e) {
+      // Last line of the Python traceback, e.g. "ValueError: line 2: ..."
+      setStatus("Technical sections: " + String(e.message).trim().split("\n").pop());
+      return;
+    }
+    const totalMin = parseHMS(timeInput.value);
+    if (totalMin !== null) {
+      const dc = distConv();
+      const totalEffort = pyodide.globals.get("total_effort_mi_current")();
+      if (totalEffort !== null && totalEffort > 0) {
+        gapInput.value = formatMS(totalMin / (totalEffort * dc));
+      }
+    }
+    scheduleRender();
+  });
+
   document.getElementById("reverse").addEventListener("change", (e) => {
     pyodide.globals.get("set_reverse")(e.target.checked);
+    techInput.value = pyodide.globals.get("technical_sections_text")();
     const totalMin = parseHMS(timeInput.value);
     if (totalMin !== null) {
       const dc = distConv();
@@ -1042,6 +1112,7 @@ function bindEvents() {
     unitsMode = e.target.value;
     pyodide.globals.get("set_units")(unitsMode);
     updateUnitLabels();
+    techInput.value = pyodide.globals.get("technical_sections_text")();
     const totalMin = parseHMS(timeInput.value);
     if (totalMin !== null) {
       const dc = distConv();
@@ -1056,6 +1127,7 @@ function bindEvents() {
     }
     scheduleRender();
   });
+
 }
 
 async function scheduleRender() {
